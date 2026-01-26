@@ -5,6 +5,7 @@ const {
   login,
   verifyToken,
   getProfile,
+  updateSubscription,
 } = require('../controllers/authController');
 
 /**
@@ -34,5 +35,12 @@ router.get('/verify', verifyToken);
  * @access  Protected (requires token)
  */
 router.get('/profile', getProfile);
+
+/**
+ * @route   PUT /api/auth/subscription
+ * @desc    Update user subscription status
+ * @access  Protected (requires token)
+ */
+router.put('/subscription', updateSubscription);
 
 module.exports = router;
