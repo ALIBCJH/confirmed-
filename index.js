@@ -4,7 +4,8 @@ const bodyParser = require('body-parser');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 10000;
+const HOST = '0.0.0.0'; // Bind to all network interfaces for Render
 
 // Middleware
 app.use(cors());
@@ -19,7 +20,7 @@ const debtsRoutes = require('./routes/debts');
 const purchasesRoutes = require('./routes/purchases');
 
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'CONFIRMED 2.0 Backend API',
     status: 'running',
     version: '1.0.0',
@@ -46,7 +47,7 @@ app.get('/health', (req, res) => {
 app.get('/api/test-connection', async (req, res) => {
   try {
     const supabase = require('./config/supabase');
-    
+
     if (!supabase) {
       return res.status(503).json({
         success: false,
@@ -93,10 +94,11 @@ app.use('/api', debtsRoutes);
 app.use('/api', purchasesRoutes);
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`🚀 Server running on ${HOST}:${PORT}`);
   console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 API: http://localhost:${PORT}`);
+  console.log(`🔗 API: http://${HOST}:${PORT}`);
+  console.log(`✅ Ready to accept connections`);
 });
 
 module.exports = app;

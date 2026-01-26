@@ -291,9 +291,78 @@ const getProfile = async (req, res) => {
   }
 };
 
+/**
+ * Update Subscription Status
+ * PUT /api/auth/subscription
+ */
+const updateSubscription = async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'No token provided',
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const { subscriptionStatus } = req.body;
+
+    // Validate subscription status
+    const validStatuses = ['trial', 'basic', 'premium'];
+    if (!subscriptionStatus || !validStatuses.includes(subscriptionStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid subscription status. Must be trial, basic, or premium',
+      });
+    }
+
+    // Update subscription in database
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ 
+        subscription_status: subscriptionStatus,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', decoded.userId)
+      .select('id, business_name, phone_number, subscription_status, created_at')
+      .single();
+
+    if (error || !updatedUser) {
+      console.error('❌ Subscription update error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update subscription',
+      });
+    }
+
+    console.log(`✅ Subscription updated for user ${decoded.userId}: ${subscriptionStatus}`);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Subscription updated successfully',
+      data: {
+        userId: updatedUser.id,
+        businessName: updatedUser.business_name,
+        phoneNumber: updatedUser.phone_number,
+        subscriptionStatus: updatedUser.subscription_status,
+        signupDate: updatedUser.created_at,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Update subscription error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error',
+    });
+  }
+};
+
 module.exports = {
   signup,
   login,
   verifyToken,
   getProfile,
+  updateSubscription,
 };
