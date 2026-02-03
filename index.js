@@ -28,6 +28,7 @@ const authRoutes = require('./routes/auth');
 const mpesaRoutes = require('./routes/mpesa');
 const debtsRoutes = require('./routes/debts');
 const purchasesRoutes = require('./routes/purchases');
+const adminRoutes = require('./routes/admin');
 
 app.get('/', (req, res) => {
   res.json({
@@ -44,6 +45,14 @@ app.get('/', (req, res) => {
       sync: 'POST /api/sync',
       transactions: 'GET /api/transactions',
       stats: 'GET /api/transactions/stats',
+      admin: {
+        overview: 'GET /api/admin/overview',
+        users: 'GET /api/admin/users',
+        userDetail: 'GET /api/admin/users/:userId',
+        featureUsage: 'GET /api/admin/feature-usage',
+        growth: 'GET /api/admin/growth',
+        subscriptions: 'GET /api/admin/subscriptions',
+      },
     }
   });
 });
@@ -102,6 +111,7 @@ app.use('/api/mpesa', mpesaRoutes);
 app.use('/api', syncRoutes);
 app.use('/api', debtsRoutes);
 app.use('/api', purchasesRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Start server
 app.listen(PORT, HOST, () => {
