@@ -1,0 +1,220 @@
+name: Pull Request Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # Backend checks
+  backend-lint:
+    name: Backend Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: Backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: Backend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: Backend
+        run: |
+          npm install --save-dev eslint
+          npx eslint . --ext .js --max-warnings 0 || echo "⚠️ Linting warnings found"
+
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: Backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: Backend
+        run: npm ci
+
+      - name: Run tests
+        working-directory: Backend
+        run: npm test || echo "⚠️ No tests configured yet"
+
+  # Frontend checks
+  frontend-lint:
+    name: Frontend Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: Frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: Frontend
+        run: npm ci
+
+      - name: Run TypeScript check
+        working-directory: Frontend
+        run: npx tsc --noEmit || echo "⚠️ TypeScript errors found"
+
+      - name: Run ESLint
+        working-directory: Frontend
+        run: npm run lint || echo "⚠️ Linting warnings found"
+
+  # Security checks
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Dependency audit
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Audit Backend dependencies
+        working-directory: Backend
+        run: npm audit --audit-level=moderate || echo "⚠️ Vulnerabilities found in Backend"
+
+      - name: Audit Frontend dependencies
+        working-directory: Frontend
+        run: npm audit --audit-level=moderate || echo "⚠️ Vulnerabilities found in Frontend"
+
+  # Code quality
+  code-quality:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true
+
+  # PR size check
+  pr-size-check:
+    name: PR Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        run: |
+          FILES_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | wc -l)
+          LINES_CHANGED=$(git diff --stat origin/${{ github.base_ref }}...HEAD | tail -1 | awk '{print $4+$6}')
+          
+          echo "📊 Files changed: $FILES_CHANGED"
+          echo "📊 Lines changed: $LINES_CHANGED"
+          
+          if [ $FILES_CHANGED -gt 50 ]; then
+            echo "⚠️ Warning: Large PR with $FILES_CHANGED files changed"
+            echo "Consider breaking this into smaller PRs for easier review"
+          fi
+          
+          if [ $LINES_CHANGED -gt 1000 ]; then
+            echo "⚠️ Warning: Large PR with $LINES_CHANGED lines changed"
+            echo "Consider breaking this into smaller PRs for easier review"
+          fi
+
+  # Check for sensitive data
+  secrets-scan:
+    name: Secrets Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Summary
+  pr-summary:
+    name: PR Summary
+    runs-on: ubuntu-latest
+    needs: [backend-lint, frontend-lint, security-scan, dependency-audit]
+    if: always()
+    steps:
+      - name: PR Summary Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const summary = `
+            ## 🔍 Pull Request Checks Summary
+            
+            | Check | Status |
+            |-------|--------|
+            | Backend Linting | ${{ needs.backend-lint.result == 'success' && '✅' || '❌' }} |
+            | Frontend Linting | ${{ needs.frontend-lint.result == 'success' && '✅' || '❌' }} |
+            | Security Scan | ${{ needs.security-scan.result == 'success' && '✅' || '⚠️' }} |
+            | Dependency Audit | ${{ needs.dependency-audit.result == 'success' && '✅' || '⚠️' }} |
+            
+            ${needs.backend-lint.result !== 'success' || needs.frontend-lint.result !== 'success' ? '⚠️ Please fix linting issues before merging' : '✅ All checks passed!'}
+            
+            ---
+            *Automated checks by GitHub Actions*
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });

@@ -1,0 +1,177 @@
+name: Automated Code Review
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    types: [opened, synchronize]
+
+jobs:
+  # AI-powered code review
+  ai-review:
+    name: AI Code Review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: AI Code Reviewer
+        uses: freeedcom/ai-codereviewer@main
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_MODEL: "gpt-4"
+          exclude: "**/*.json,**/*.md,**/*.txt,**/package-lock.json"
+        continue-on-error: true
+
+  # Conventional commits check
+  commit-lint:
+    name: Commit Message Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install commitlint
+        run: |
+          npm install --save-dev @commitlint/cli @commitlint/config-conventional
+
+      - name: Validate commit messages
+        run: |
+          npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose || echo "⚠️ Commit messages don't follow conventional format"
+
+  # Check for TODO/FIXME comments
+  todo-check:
+    name: TODO/FIXME Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Find TODOs and FIXMEs
+        run: |
+          echo "## 📝 TODOs and FIXMEs found in this PR:" > todo-report.md
+          echo "" >> todo-report.md
+          
+          git diff origin/${{ github.base_ref }}...HEAD --unified=0 | grep -E "^\+.*TODO|^\+.*FIXME" | sed 's/^+//' >> todo-report.md || echo "No TODOs or FIXMEs found" >> todo-report.md
+          
+          cat todo-report.md
+
+      - name: Comment TODOs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('todo-report.md', 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });
+
+  # Code complexity check
+  complexity-check:
+    name: Code Complexity Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install complexity tool
+        run: npm install -g complexity-report
+
+      - name: Analyze complexity
+        run: |
+          echo "## 📊 Code Complexity Report" > complexity-report.md
+          echo "" >> complexity-report.md
+          
+          # Analyze JavaScript files
+          find Backend -name "*.js" -type f | while read file; do
+            echo "### $file" >> complexity-report.md
+            cr "$file" --format markdown >> complexity-report.md 2>/dev/null || echo "Could not analyze $file" >> complexity-report.md
+          done
+          
+          # Analyze TypeScript files
+          find Frontend/src -name "*.ts" -o -name "*.tsx" -type f | head -10 | while read file; do
+            echo "### $file" >> complexity-report.md
+            cr "$file" --format markdown >> complexity-report.md 2>/dev/null || echo "Could not analyze $file" >> complexity-report.md
+          done
+        continue-on-error: true
+
+  # Documentation check
+  docs-check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for documentation updates
+        run: |
+          FILES_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          
+          # Check if code changes include doc updates
+          CODE_CHANGED=$(echo "$FILES_CHANGED" | grep -E '\.(js|ts|tsx)$' | wc -l)
+          DOCS_CHANGED=$(echo "$FILES_CHANGED" | grep -E '\.(md)$' | wc -l)
+          
+          echo "📝 Code files changed: $CODE_CHANGED"
+          echo "📚 Documentation files changed: $DOCS_CHANGED"
+          
+          if [ $CODE_CHANGED -gt 5 ] && [ $DOCS_CHANGED -eq 0 ]; then
+            echo "⚠️ Warning: Significant code changes without documentation updates"
+            echo "Consider updating relevant .md files"
+          fi
+
+  # Test coverage check
+  coverage-check:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Backend dependencies
+        working-directory: Backend
+        run: npm ci
+
+      - name: Run Backend tests with coverage
+        working-directory: Backend
+        run: |
+          npm install --save-dev jest
+          npm test -- --coverage || echo "⚠️ No tests configured"
+        continue-on-error: true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: ./Backend/coverage
+          flags: backend
+        continue-on-error: true

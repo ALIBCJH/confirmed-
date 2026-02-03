@@ -1,0 +1,38 @@
+name: Keep Render Service Alive
+
+on:
+  schedule:
+    # Run every 12 minutes (safely under the 15-minute sleep threshold)
+    - cron: '*/12 * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Random Sleep & Ping
+        env:
+          RENDER_URL: ${{ secrets.RENDER_URL }}
+        run: |
+          # Generate random sleep time between 0-300 seconds (0-5 minutes)
+          SLEEP_TIME=$((RANDOM % 300))
+          echo "🕐 Sleeping for $SLEEP_TIME seconds to randomize ping time..."
+          sleep $SLEEP_TIME
+          
+          # Ping the health endpoint
+          echo "🏓 Pinging Render service at $(date)"
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$RENDER_URL/health")
+          
+          if [ "$RESPONSE" -eq 200 ]; then
+            echo "✅ Service is alive! (HTTP $RESPONSE)"
+          else
+            echo "⚠️ Service returned HTTP $RESPONSE"
+          fi
+          
+          # Also ping the root endpoint for good measure
+          curl -s "$RENDER_URL/" > /dev/null
+          echo "🎯 Keep-alive ping completed at $(date)"

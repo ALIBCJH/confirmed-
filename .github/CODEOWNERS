@@ -1,0 +1,17 @@
+# Backend Code Owners
+# Auto-assigns reviewers for PRs
+
+# All files
+* @ALIBCJH
+
+# Routes
+/routes/ @ALIBCJH
+
+# Controllers
+/controllers/ @ALIBCJH
+
+# Configuration
+*.yml @ALIBCJH
+*.yaml @ALIBCJH
+*.json @ALIBCJH
+.env.example @ALIBCJH
