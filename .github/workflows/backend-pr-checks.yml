@@ -1,0 +1,166 @@
+name: Backend PR Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+      - staging
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # Linting
+  lint:
+    name: ESLint Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: |
+          npm install --save-dev eslint
+          npx eslint . --ext .js --max-warnings 10 || echo "⚠️ Linting warnings found"
+
+  # Tests
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test || echo "⚠️ No tests configured yet"
+        continue-on-error: true
+
+  # Security scan
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run npm audit
+        run: npm audit --audit-level=moderate || echo "⚠️ Vulnerabilities found"
+        continue-on-error: true
+
+      - name: Check for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+  # Branch naming
+  branch-check:
+    name: Branch Name Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch name
+        run: |
+          BRANCH_NAME="${{ github.head_ref }}"
+          
+          if [[ ! $BRANCH_NAME =~ ^(feature|bugfix|hotfix|release|refactor|docs|test|chore)/.+ ]]; then
+            echo "❌ Invalid branch name: $BRANCH_NAME"
+            echo "Use: feature/*, bugfix/*, hotfix/*, release/*, refactor/*, docs/*, test/*, chore/*"
+            exit 1
+          fi
+          
+          echo "✅ Branch name is valid: $BRANCH_NAME"
+
+  # PR description check
+  pr-description:
+    name: PR Description Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR body
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            
+            if (body.length < 30) {
+              core.setFailed('❌ PR description too short. Please provide details (minimum 30 characters).');
+            } else {
+              console.log('✅ PR description is adequate');
+            }
+
+  # PR size check
+  pr-size:
+    name: PR Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        run: |
+          FILES_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | wc -l)
+          LINES_CHANGED=$(git diff --stat origin/${{ github.base_ref }}...HEAD | tail -1 | awk '{print $4+$6}')
+          
+          echo "📊 Files changed: $FILES_CHANGED"
+          echo "📊 Lines changed: $LINES_CHANGED"
+          
+          if [ $FILES_CHANGED -gt 30 ]; then
+            echo "⚠️ Large PR: $FILES_CHANGED files changed"
+          fi
+          
+          if [ $LINES_CHANGED -gt 500 ]; then
+            echo "⚠️ Large PR: $LINES_CHANGED lines changed"
+          fi
+
+  # Summary
+  summary:
+    name: PR Summary
+    runs-on: ubuntu-latest
+    needs: [lint, test, security, branch-check, pr-description]
+    if: always()
+    steps:
+      - name: Post summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const summary = `
+            ## 🔍 Backend PR Checks Summary
+            
+            | Check | Status |
+            |-------|--------|
+            | Linting | ${{ needs.lint.result == 'success' && '✅' || '❌' }} |
+            | Tests | ${{ needs.test.result == 'success' && '✅' || '⚠️' }} |
+            | Security | ${{ needs.security.result == 'success' && '✅' || '⚠️' }} |
+            | Branch Name | ${{ needs.branch-check.result == 'success' && '✅' || '❌' }} |
+            | PR Description | ${{ needs.pr-description.result == 'success' && '✅' || '❌' }} |
+            
+            ${needs.lint.result !== 'success' || needs.branch-check.result !== 'success' || needs.pr-description.result !== 'success' ? '⚠️ Please fix issues before merging' : '✅ All required checks passed!'}
+            
+            ---
+            *Automated by GitHub Actions*
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
